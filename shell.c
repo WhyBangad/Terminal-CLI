@@ -6,6 +6,7 @@
 #include<fcntl.h>
 #include<limits.h>
 #include<errno.h>
+#include<stdbool.h>
 
 #define CHUNK_SIZ 10
 #define INPUT_SIZ 1025
@@ -16,10 +17,11 @@
 #define USER getlogin()
 #endif
 
-// v1 -> no pipes and no additional params
+// v1 -> no pipes
 // find macros for command and input size
 
 char* get_newd(char* current_dir, char* token);
+bool run_bckgnd(char* token);
 
 int main(int argc, char* argv[]){
     char* current_dir = (char*) malloc(PATH_MAX * sizeof(char));
@@ -28,14 +30,17 @@ int main(int argc, char* argv[]){
     char* command = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* args = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* program = (char*) malloc(INPUT_SIZ * sizeof(char));
+    
+    bool bckgnd_exec = false;
+
+    current_dir = getcwd(current_dir, PATH_MAX);
+    if(current_dir == NULL){
+        perror("Error in fetching current directory : ");
+        exit(1);
+    }
 
     while(1){
-        current_dir = getcwd(current_dir, PATH_MAX);
-        if(current_dir == NULL){
-            perror("Error in fetching current directory : ");
-            exit(1);
-        }
-        
+        bckgnd_exec = false;
         if(argc < 2 || strcmp(argv[1], "source") != 0){
             // avoid printing when executing source
             printf("user@shell: ");
@@ -43,8 +48,13 @@ int main(int argc, char* argv[]){
 
         fgets(input, INPUT_SIZ, stdin);
         command = strtok(input, " \n");
-        
-        if(strcmp(command, "exit") == 0){
+
+        if(command == NULL && strlen(input) != 0){
+            // user pressed enter
+            // strlen used to detect end of file
+            continue;
+        }
+        else if(strcmp(command, "exit") == 0){
             exit(0);
         }
         else if(strcmp(command, "cd") == 0){
@@ -59,16 +69,43 @@ int main(int argc, char* argv[]){
         else if(strcmp(command, "pwd") == 0){
             printf("%s\n", current_dir);
         }
-        else if(strcmp(command, "source") == 0){
-            token = strtok(NULL, "\n");
+        else if(strcmp(command, "cat") == 0){
+            token = strtok(NULL, " \n");
+            if(token == NULL){
+                continue;
+            }
+            
             int fd_in = open(token, O_RDONLY);
+            char* buffer = (char*) malloc(INPUT_SIZ * sizeof(char));
+            while(1){
+                int n_read = read(fd_in, buffer, INPUT_SIZ);
+                for(int i = 0; i < n_read; ++i){
+                    printf("%c", buffer[i]);
+                }
+
+                if(n_read < INPUT_SIZ){
+                    break;
+                }
+            }
+        }
+        else if(strcmp(command, "source") == 0){
+            token = strtok(NULL, " \n");
+            int fd_in = open(token, O_RDONLY);
+            
+            token = strtok(NULL, " \n");
+            if(token != NULL && run_bckgnd(token)){
+                printf("Executing in background!\n");
+                bckgnd_exec = true;
+            }
             if(fd_in == -1){
-                perror("Error in opening the file ");
+                perror("Error in opening file ");
                 continue;
             }
             if(fork() > 0){
-                int status;
-                wait(&status);
+                if(!bckgnd_exec){
+                    int status;
+                    wait(&status);
+                }
             }
             else{
                 dup2(fd_in, 0);
@@ -80,10 +117,10 @@ int main(int argc, char* argv[]){
             printf("%s\n", args);
         }
         else{
+            // run in background
             if(fork() > 0){
                 int status;
                 wait(&status);
-                printf("STATUS : %d\n", WEXITSTATUS(status));
             }
             else{
                 char *params[MAX_PARAMS];
@@ -94,7 +131,6 @@ int main(int argc, char* argv[]){
                     params[count++] = token;
                 }
                 while((token = strtok(NULL, " \n")) != NULL);
-
                 params[count] = (char*) malloc(sizeof(char));
                 params[count] = NULL;
                 int ret = execvp(get_newd(current_dir, params[0]), params);
@@ -130,6 +166,12 @@ char* get_newd(char* current_dir, char* token){
     return strcat(strcat(current_dir, "/"), token);
 }
 
+bool run_bckgnd(char* token){
+    if(strlen(token) == 1 && token[0] == '&'){
+        return true;
+    }
+    return false;
+}
 
 /* headers and their used functions :
     --> stdio : perror, printf, fgets
@@ -139,4 +181,5 @@ char* get_newd(char* current_dir, char* token){
     --> wait : wait
     --> limits : PATH_MAX
     --> errno : errno
+    --> stdbool : boolean data type
 */
