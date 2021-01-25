@@ -9,6 +9,7 @@
 
 #define CHUNK_SIZ 10
 #define INPUT_SIZ 1025
+#define MAX_PARAMS 100
 #define HOME "/home/"
 
 #ifndef USER
@@ -25,7 +26,8 @@ int main(int argc, char* argv[]){
     char* input = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* token = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* command = (char*) malloc(INPUT_SIZ * sizeof(char));
-    char* params = (char*) malloc(INPUT_SIZ * sizeof(char));
+    char* args = (char*) malloc(INPUT_SIZ * sizeof(char));
+    char* program = (char*) malloc(INPUT_SIZ * sizeof(char));
 
     while(1){
         current_dir = getcwd(current_dir, PATH_MAX);
@@ -49,7 +51,7 @@ int main(int argc, char* argv[]){
             token = strtok(NULL, " \n");
             if(chdir(get_newd(current_dir, token)) == -1){
                 perror("Error in cd ");
-                exit(-1);
+                continue;
             }
 
             current_dir = getcwd(current_dir, PATH_MAX);
@@ -74,19 +76,40 @@ int main(int argc, char* argv[]){
             }
         }
         else if(strcmp(command, "echo") == 0){
-            params = strtok(NULL, "\n");
-            printf("%s\n", params);
+            args = strtok(NULL, "\n");
+            printf("%s\n", args);
         }
         else{
-            command = strtok(input, "\n");
-            printf("%s : command not found\n", command);
+            if(fork() > 0){
+                int status;
+                wait(&status);
+                printf("STATUS : %d\n", WEXITSTATUS(status));
+            }
+            else{
+                char *params[MAX_PARAMS];
+                int count = 0;
+                token = command;
+                do{
+                    params[count] = (char*) malloc(INPUT_SIZ * sizeof(char));
+                    params[count++] = token;
+                }
+                while((token = strtok(NULL, " \n")) != NULL);
+
+                params[count] = (char*) malloc(sizeof(char));
+                params[count] = NULL;
+                int ret = execvp(get_newd(current_dir, params[0]), params);
+                if(ret == -1){
+                    perror("Error ");
+                    kill(getpid(), SIGINT);
+                }
+            }
         }
         // to avoid going into infinite loop when executing source. Method is slow tho?
         memset(input, '\0', INPUT_SIZ);
     }
     free(current_dir);
     free(token);
-    free(params);
+    free(args);
     free(input);
     free(command);
 
@@ -100,7 +123,7 @@ char* get_newd(char* current_dir, char* token){
         dir = strcpy(dir, HOME);
         return strcat(dir, USER);
     }
-    if(strcmp(token, "") == 0 || strcmp(token, "..")){
+    if(strcmp(token, "") == 0 || strcmp(token, "..") == 0){
         return token;
     }
     
