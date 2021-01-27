@@ -201,19 +201,36 @@ int main(int argc, char* argv[]){
             }
             else{
                 // run in background
+                int fd_in = 0, fd_out = 1;
                 char *params[MAX_PARAMS];
                 int count = 0;
                 token = command;
                 do{
                     params[count] = (char*) malloc(INPUT_SIZ * sizeof(char));
-                    if(strlen(token) == 1 && strcmp(token, ";") == 0){
+                    if(strlen(token) == 1 && token[0] == ';'){
                         break;
                     }
-                    if(strlen(token) == 1 && strcmp(token, "&") == 0){
+                    else if(strlen(token) == 1 && token[0] == '&'){
                         bckgnd_exec = true;
                         break;
                     }
-                    params[count++] = token;
+                    else if(strlen(token) == 1 && token[0] == '<'){
+                        token = strtok(NULL, " \n");
+                        if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
+                            break;
+                        }
+                        fd_in = open(token, O_RDONLY);
+                    }
+                    else if(strlen(token) == 1 && token[0] == '>'){
+                        token = strtok(NULL, " \n");
+                        if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
+                            break;
+                        }
+                        fd_out = creat(token, (1 << 9) - 1);
+                    }
+                    else{
+                        params[count++] = token;
+                    }
                 }
                 while((token = strtok(NULL, " \n")) != NULL);
                 params[count] = NULL;
@@ -224,6 +241,14 @@ int main(int argc, char* argv[]){
                     }
                 }
                 else{
+                    if(fd_in != 0){
+                        dup2(fd_in, 0);
+                        close(fd_in);
+                    }
+                    if(fd_out != 1){
+                        dup2(fd_out, 1);
+                        close(fd_out);
+                    }
                     int ret = execvp(params[0], params);
                     if(ret == -1){
                         perror("Error ");
