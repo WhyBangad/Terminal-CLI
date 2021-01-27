@@ -21,7 +21,10 @@
 #endif
 
 //no pipes
-// find macros for command and input size
+/*issues :
+    1) ctrl + c interrupt is only caught once
+    2) write all errors to the error stream not standard output
+*/
 
 char* get_newd(char* current_dir, char* token);
 void ctrl_c_handler(int sig);
@@ -35,6 +38,7 @@ int main(int argc, char* argv[]){
     char* command = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* args = (char*) malloc(INPUT_SIZ * sizeof(char));
     
+    signal(SIGINT, ctrl_c_handler);
     bool bckgnd_exec = false;
 
     current_dir = getcwd(current_dir, PATH_MAX);
@@ -43,14 +47,12 @@ int main(int argc, char* argv[]){
         exit(1);
     }
 
-    while(1){
+    if(setjmp(env_buffer) != 0){
         signal(SIGINT, ctrl_c_handler);
+        printf("\n");
+    }
 
-        if(setjmp(env_buffer) != 0){
-            printf("\n");
-            continue;
-        }
-
+    while(1){
         if(argc < 2 || strcmp(argv[1], "source") != 0){
             // avoid printing when executing source
             printf("user@shell: ");
@@ -59,7 +61,7 @@ int main(int argc, char* argv[]){
         fgets(input, INPUT_SIZ, stdin);
         command = strtok(input, " \n");
         if(command == NULL && strlen(input) != 0){
-        // user pressed enter
+            // user pressed enter
             continue;
         }
         do{
@@ -74,8 +76,7 @@ int main(int argc, char* argv[]){
             }
             else if(strcmp(command, "cd") == 0){
                 token = strtok(NULL, " \n");
-                
-                // replace with token only and handle token = NULL
+
                 if(strcmp(token, ";") == 0){
                     token = NULL;
                 }
@@ -94,16 +95,42 @@ int main(int argc, char* argv[]){
                 printf("%s\n", current_dir);
             }
             else if(strcmp(command, "cat") == 0){
+                int fd_in = 0, fd_out = 1;
                 token = strtok(NULL, " ;\n");
                 if(token == NULL){
                     continue;
                 }
-                
-                int fd_in = open(token, O_RDONLY);
+                if(strlen(token) == 1 && token[0] == '<'){
+                    token = strtok(NULL, " \n");
+                    if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
+                        printf("shell: syntax error near <\n");
+                        continue;
+                    }
+                    fd_in = open(token, O_RDONLY);
+                    token = strtok(NULL, " \n");
+                }
+                else{
+                    fd_in = open(token, O_RDONLY);
+                    token = strtok(NULL, " \n");
+                }
+                if(token != NULL && strlen(token) == 1 && token[0] == '>'){
+                    token = strtok(NULL, " \n");
+                    if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
+                        printf("shell: syntax error near >\n");
+                        continue;
+                    }
+                    fd_out = creat(token, (1 << 9) - 1);
+                    token = strtok(NULL, " \n");
+                }
                 char* buffer = (char*) malloc(INPUT_SIZ * sizeof(char));
                 while(1){
                     int n_read = read(fd_in, buffer, INPUT_SIZ);
-                    printf("%s", buffer);
+                    if(fd_out != 1){
+                        write(fd_out, buffer, n_read);
+                    }
+                    else{
+                        printf("%s", buffer);
+                    }
 
                     if(n_read < INPUT_SIZ){
                         break;
@@ -111,14 +138,40 @@ int main(int argc, char* argv[]){
                 }
             }
             else if(strcmp(command, "source") == 0){
+                int fd_in = 0, fd_out = 1;
                 token = strtok(NULL, " \n");
-                int fd_in = open(token, O_RDONLY);
                 
-                token = strtok(NULL, " \n");
+                if(token == NULL){
+                    printf("bash: source: filename argument required\n");
+                    continue;
+                }
+                if(strlen(token) == 1 && token[0] == '<'){
+                    token = strtok(NULL, " \n");
+                    if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
+                        printf("source: syntax error near <\n");
+                        continue;
+                    }
+                    fd_in = open(token, O_RDONLY);
+                    token = strtok(NULL, " \n");
+                }
+                else{
+                    fd_in = open(token, O_RDONLY);
+                    token = strtok(NULL, " \n");
+                }
+                if(token != NULL && strlen(token) == 1 && token[0] == '>'){
+                    token = strtok(NULL, " \n");
+                    if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
+                        printf("source: syntax error near >\n");
+                        continue;
+                    }
+                    fd_out = creat(token, (1 << 9) - 1);
+                    token = strtok(NULL, " \n");
+                }
+                
                 if(token != NULL && strlen(token) == 1 && strcmp(token, "&") == 0){
                     bckgnd_exec = true;
                 }
-                if(fd_in == -1){
+                if(fd_in == -1 || fd_out == -1){
                     perror("Error in opening file ");
                     continue;
                 }
@@ -129,7 +182,14 @@ int main(int argc, char* argv[]){
                     }
                 }
                 else{
-                    dup2(fd_in, 0);
+                    if(fd_in != 0){
+                        dup2(fd_in, 0);
+                        close(fd_in);
+                    }
+                    if(fd_out != 1){
+                        dup2(fd_out, 1);
+                        close(fd_out);
+                    }
                     execl("shell", "shell", "source", NULL);
                 }
             }
@@ -170,10 +230,8 @@ int main(int argc, char* argv[]){
                         kill(getpid(), SIGTERM);
                     }
                 }
-                for(int i = 0; i < count; ++i){
-                    free(params[i]);
-                }
             }
+            fflush(stdout);
         }
         while((command = strtok(NULL, " \n")) != NULL);
         
