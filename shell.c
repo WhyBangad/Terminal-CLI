@@ -109,10 +109,6 @@ int main(int argc, char* argv[]){
                     fd_in = open(token, O_RDONLY);
                     token = strtok(NULL, " \n");
                 }
-                else{
-                    fd_in = open(token, O_RDONLY);
-                    token = strtok(NULL, " \n");
-                }
                 if(token != NULL && strlen(token) == 1 && token[0] == '>'){
                     token = strtok(NULL, " \n");
                     if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
@@ -122,18 +118,23 @@ int main(int argc, char* argv[]){
                     fd_out = creat(token, (1 << 9) - 1);
                     token = strtok(NULL, " \n");
                 }
+
+                if(fd_in == 0 && fd_out == 1){
+                    fd_in = open(token, O_RDONLY);
+                }
                 char* buffer = (char*) malloc(INPUT_SIZ * sizeof(char));
+                // system utility?
                 while(1){
-                    int n_read = read(fd_in, buffer, INPUT_SIZ);
+                    int n_read = read(fd_in, buffer, 1);
+                    if(n_read < 1){
+                        // EOF
+                        break;
+                    }
                     if(fd_out != 1){
                         write(fd_out, buffer, n_read);
                     }
                     else{
                         printf("%s", buffer);
-                    }
-
-                    if(n_read < INPUT_SIZ){
-                        break;
                     }
                 }
             }
