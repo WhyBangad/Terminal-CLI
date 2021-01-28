@@ -15,6 +15,7 @@
 #define MAX_PARAMS 100
 #define HOME "/home/"
 #define USER "yatn"
+#define GRP_ID 123
 
 #ifndef USER
 #define USER getlogin()
@@ -28,6 +29,7 @@
 
 char* get_newd(char* current_dir, char* token);
 void ctrl_c_handler(int sig);
+bool is_active(int* fd);
 
 jmp_buf env_buffer;
 
@@ -37,9 +39,12 @@ int main(int argc, char* argv[]){
     char* token = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* command = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* args = (char*) malloc(INPUT_SIZ * sizeof(char));
+    int pipe_fd[2] = {-1, -1};
     
     signal(SIGINT, ctrl_c_handler);
     bool bckgnd_exec = false;
+
+    setpgid(getpid(), GRP_ID);
 
     current_dir = getcwd(current_dir, PATH_MAX);
     if(current_dir == NULL){
@@ -49,6 +54,8 @@ int main(int argc, char* argv[]){
 
     if(setjmp(env_buffer) != 0){
         signal(SIGINT, ctrl_c_handler);
+        // change kill
+        killpg(GRP_ID, SIGKILL);
         printf("\n");
     }
 
@@ -57,6 +64,8 @@ int main(int argc, char* argv[]){
             // avoid printing when executing source
             printf("user@shell: ");
         }
+        // reset pipe
+        pipe_fd[0] = pipe_fd[1] = -1;
 
         fgets(input, INPUT_SIZ, stdin);
         command = strtok(input, " \n");
@@ -72,6 +81,8 @@ int main(int argc, char* argv[]){
                 exit(0);
             }
             else if(strcmp(command, ";") == 0){
+                // reset pipe
+                pipe_fd[0] = pipe_fd[1] = -1;
                 continue;
             }
             else if(strcmp(command, "cd") == 0){
@@ -93,50 +104,6 @@ int main(int argc, char* argv[]){
             }
             else if(strcmp(command, "pwd") == 0){
                 printf("%s\n", current_dir);
-            }
-            else if(strcmp(command, "cat") == 0){
-                int fd_in = 0, fd_out = 1;
-                token = strtok(NULL, " ;\n");
-                if(token == NULL){
-                    continue;
-                }
-                if(strlen(token) == 1 && token[0] == '<'){
-                    token = strtok(NULL, " \n");
-                    if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
-                        printf("shell: syntax error near <\n");
-                        continue;
-                    }
-                    fd_in = open(token, O_RDONLY);
-                    token = strtok(NULL, " \n");
-                }
-                if(token != NULL && strlen(token) == 1 && token[0] == '>'){
-                    token = strtok(NULL, " \n");
-                    if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
-                        printf("shell: syntax error near >\n");
-                        continue;
-                    }
-                    fd_out = creat(token, (1 << 9) - 1);
-                    token = strtok(NULL, " \n");
-                }
-
-                if(fd_in == 0 && fd_out == 1){
-                    fd_in = open(token, O_RDONLY);
-                }
-                char* buffer = (char*) malloc(INPUT_SIZ * sizeof(char));
-                // system utility?
-                while(1){
-                    int n_read = read(fd_in, buffer, 1);
-                    if(n_read < 1){
-                        // EOF
-                        break;
-                    }
-                    if(fd_out != 1){
-                        write(fd_out, buffer, n_read);
-                    }
-                    else{
-                        printf("%s", buffer);
-                    }
-                }
             }
             else if(strcmp(command, "source") == 0){
                 int fd_in = 0, fd_out = 1;
@@ -207,7 +174,7 @@ int main(int argc, char* argv[]){
                 int count = 0;
                 token = command;
                 do{
-                    params[count] = (char*) malloc(INPUT_SIZ * sizeof(char));
+                    //printf("TOKEN : %s\n", token);
                     if(strlen(token) == 1 && token[0] == ';'){
                         break;
                     }
@@ -230,6 +197,7 @@ int main(int argc, char* argv[]){
                         fd_out = creat(token, (1 << 9) - 1);
                     }
                     else{
+                        params[count] = (char*) malloc(INPUT_SIZ * sizeof(char));
                         params[count++] = token;
                     }
                 }
@@ -289,6 +257,13 @@ char* get_newd(char* current_dir, char* token){
 void ctrl_c_handler(int sig){
     signal(SIGINT, ctrl_c_handler);
     longjmp(env_buffer, 1);
+}
+
+bool is_active(int* fd){
+    if(fd[0] != -1 || fd[1] != -1){
+        return true;
+    }
+    return false;
 }
 
 /* headers and their used functions :
