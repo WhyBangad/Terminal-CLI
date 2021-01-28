@@ -20,10 +20,6 @@
 #define USER getlogin()
 #endif
 
-/*issues :
-    2) write all errors to the error stream not standard output
-*/
-
 char* get_newd(char* current_dir, char* token);
 void ctrl_c_handler(int sig);
 bool is_active(int* fd);
@@ -78,14 +74,16 @@ int main(int argc, char* argv[]){
             }
             else if(strcmp(command, "cd") == 0){
                 token = strtok(NULL, " \n");
-
-                if(strcmp(token, ";") == 0){
-                    token = NULL;
-                }
+                
                 if(token == NULL){
                     token = (char*) malloc(PATH_MAX * sizeof(char));
                     token = strcat(strcat(token, HOME), USER);
                 }
+
+                if(strcmp(token, ";") == 0){
+                    token = NULL;
+                }
+                
                 if(chdir(token) == -1){
                     perror("Error in cd ");
                     continue;
