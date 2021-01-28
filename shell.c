@@ -251,19 +251,6 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
-char* get_newd(char* current_dir, char* token){
-    if(token == NULL){
-        char* dir = (char*) malloc(PATH_MAX * sizeof(char));
-        dir = strcpy(dir, HOME);
-        return strcat(dir, USER);
-    }
-    if(strcmp(token, "") == 0 || strcmp(token, "..") == 0 || strcmp(token, "-") == 0){
-        return token;
-    }
-    
-    return strcat(strcat(current_dir, "/"), token);
-}
-
 void ctrl_c_handler(int sig){
     signal(SIGINT, ctrl_c_handler);
     signal(SIGUSR1, SIG_IGN);
