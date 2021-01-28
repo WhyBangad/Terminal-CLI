@@ -25,6 +25,7 @@
 /*issues :
     1) ctrl + c interrupt is only caught once
     2) write all errors to the error stream not standard output
+    3) kill all children
 */
 
 char* get_newd(char* current_dir, char* token);
@@ -39,9 +40,11 @@ int main(int argc, char* argv[]){
     char* token = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* command = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* args = (char*) malloc(INPUT_SIZ * sizeof(char));
-    int pipe_fd[2] = {-1, -1};
+    int fd_in = 0, fd_out = 1;
+    int pipe_fd[2];
     
     signal(SIGINT, ctrl_c_handler);
+
     bool bckgnd_exec = false;
 
     setpgid(getpid(), GRP_ID);
@@ -53,7 +56,6 @@ int main(int argc, char* argv[]){
     }
 
     if(setjmp(env_buffer) != 0){
-        signal(SIGINT, ctrl_c_handler);
         // change kill
         killpg(GRP_ID, SIGKILL);
         printf("\n");
@@ -64,7 +66,8 @@ int main(int argc, char* argv[]){
             // avoid printing when executing source
             printf("user@shell: ");
         }
-        // reset pipe
+        fd_in = 0;
+        fd_out = 1;
         pipe_fd[0] = pipe_fd[1] = -1;
 
         fgets(input, INPUT_SIZ, stdin);
@@ -74,13 +77,14 @@ int main(int argc, char* argv[]){
             continue;
         }
         do{
-            //printf("COMMAND : %s\n", command);
             bckgnd_exec = false;
 
             if(strcmp(command, "exit") == 0){
                 exit(0);
             }
             else if(strcmp(command, ";") == 0){
+                fd_in = 0;
+                fd_out = 1;
                 // reset pipe
                 pipe_fd[0] = pipe_fd[1] = -1;
                 continue;
@@ -106,7 +110,6 @@ int main(int argc, char* argv[]){
                 printf("%s\n", current_dir);
             }
             else if(strcmp(command, "source") == 0){
-                int fd_in = 0, fd_out = 1;
                 token = strtok(NULL, " \n");
                 
                 if(token == NULL){
@@ -162,6 +165,7 @@ int main(int argc, char* argv[]){
                 }
             }
             else if(strcmp(command, "echo") == 0){
+                // no support for I/O redirection
                 command = strtok(NULL, ";\n");
                 printf("%s", command);
                 printf("\n");
@@ -169,13 +173,25 @@ int main(int argc, char* argv[]){
             }
             else{
                 // run in background
-                int fd_in = 0, fd_out = 1;
                 char *params[MAX_PARAMS];
                 int count = 0;
                 token = command;
                 do{
                     //printf("TOKEN : %s\n", token);
                     if(strlen(token) == 1 && token[0] == ';'){
+                        break;
+                    }
+                    else if(strlen(token) == 1 && token[0] == '|'){
+                        if(is_active(pipe_fd)){
+                            // read from old pipe
+                            fd_in = pipe_fd[0];
+                        }
+                        if(pipe(pipe_fd) == -1){
+                            perror("error in piping ");
+                            break;
+                        }
+                        // always write to new pipe
+                        fd_out = pipe_fd[1];
                         break;
                     }
                     else if(strlen(token) == 1 && token[0] == '&'){
@@ -213,10 +229,16 @@ int main(int argc, char* argv[]){
                     if(fd_in != 0){
                         dup2(fd_in, 0);
                         close(fd_in);
+                        if(pipe_fd[0] != -1){
+                            close(pipe_fd[0]);
+                        }
                     }
                     if(fd_out != 1){
                         dup2(fd_out, 1);
                         close(fd_out);
+                        if(pipe_fd[1] != -1){
+                            close(pipe_fd[1]);
+                        }
                     }
                     int ret = execvp(params[0], params);
                     if(ret == -1){
@@ -224,6 +246,10 @@ int main(int argc, char* argv[]){
                         kill(getpid(), SIGTERM);
                     }
                 }
+            }
+            if(is_active(pipe_fd)){
+                fd_in = pipe_fd[0];
+                close(pipe_fd[1]);
             }
             fflush(stdout);
         }
@@ -255,7 +281,7 @@ char* get_newd(char* current_dir, char* token){
 }
 
 void ctrl_c_handler(int sig){
-    signal(SIGINT, ctrl_c_handler);
+    fprintf(stderr, "HANDLER 1\n");
     longjmp(env_buffer, 1);
 }
 
