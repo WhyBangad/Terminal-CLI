@@ -15,17 +15,13 @@
 #define MAX_PARAMS 100
 #define HOME "/home/"
 #define USER "yatn"
-#define GRP_ID 123
 
 #ifndef USER
 #define USER getlogin()
 #endif
 
-//no pipes
 /*issues :
-    1) ctrl + c interrupt is only caught once
     2) write all errors to the error stream not standard output
-    3) kill all children
 */
 
 char* get_newd(char* current_dir, char* token);
@@ -39,15 +35,10 @@ int main(int argc, char* argv[]){
     char* input = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* token = (char*) malloc(INPUT_SIZ * sizeof(char));
     char* command = (char*) malloc(INPUT_SIZ * sizeof(char));
-    char* args = (char*) malloc(INPUT_SIZ * sizeof(char));
     int fd_in = 0, fd_out = 1;
     int pipe_fd[2];
-    
-    signal(SIGINT, ctrl_c_handler);
 
     bool bckgnd_exec = false;
-
-    setpgid(getpid(), GRP_ID);
 
     current_dir = getcwd(current_dir, PATH_MAX);
     if(current_dir == NULL){
@@ -55,11 +46,7 @@ int main(int argc, char* argv[]){
         exit(1);
     }
 
-    if(setjmp(env_buffer) != 0){
-        // change kill
-        killpg(GRP_ID, SIGKILL);
-        printf("\n");
-    }
+    signal(SIGINT, ctrl_c_handler);
 
     while(1){
         if(argc < 2 || strcmp(argv[1], "source") != 0){
@@ -113,13 +100,13 @@ int main(int argc, char* argv[]){
                 token = strtok(NULL, " \n");
                 
                 if(token == NULL){
-                    printf("bash: source: filename argument required\n");
+                    fprintf(stderr, "bash: source: filename argument required\n");
                     continue;
                 }
                 if(strlen(token) == 1 && token[0] == '<'){
                     token = strtok(NULL, " \n");
                     if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
-                        printf("source: syntax error near <\n");
+                        fprintf(stderr, "source: syntax error near <\n");
                         continue;
                     }
                     fd_in = open(token, O_RDONLY);
@@ -132,7 +119,7 @@ int main(int argc, char* argv[]){
                 if(token != NULL && strlen(token) == 1 && token[0] == '>'){
                     token = strtok(NULL, " \n");
                     if(token == NULL || (strlen(token) == 1 && token[0] == ';')){
-                        printf("source: syntax error near >\n");
+                        fprintf(stderr, "source: syntax error near >\n");
                         continue;
                     }
                     fd_out = creat(token, (1 << 9) - 1);
@@ -260,7 +247,6 @@ int main(int argc, char* argv[]){
     }
     free(current_dir);
     free(token);
-    free(args);
     free(input);
     free(command);
 
@@ -281,8 +267,12 @@ char* get_newd(char* current_dir, char* token){
 }
 
 void ctrl_c_handler(int sig){
-    fprintf(stderr, "HANDLER 1\n");
-    longjmp(env_buffer, 1);
+    signal(SIGINT, ctrl_c_handler);
+    signal(SIGUSR1, SIG_IGN);
+    kill(-getpid(), SIGUSR1);
+    fflush(stdout);
+    fflush(stdin);
+    write(0, "\nuser@shell: ", 14);
 }
 
 bool is_active(int* fd){
